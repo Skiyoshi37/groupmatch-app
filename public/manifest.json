@@ -1,6 +1,6 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "TeamUp",
+  "name": "TeamUp - Connect Friend Groups",
   "icons": [
     {
       "src": "favicon.ico",
@@ -10,16 +10,31 @@
     {
       "src": "logo192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "maskable"
     },
     {
       "src": "logo512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any"
     }
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "theme_color": "#a855f7",
+  "background_color": "#fdf2f8",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "categories": ["social", "lifestyle"],
+  "description": "Connect your friend groups with other friend groups. Team up with friends to discover and match with other teams for group activities and hangouts.",
+  "lang": "en",
+  "screenshots": [
+    {
+      "src": "screenshot1.png",
+      "type": "image/png",
+      "sizes": "540x720",
+      "form_factor": "narrow"
+    }
+  ]
 }
