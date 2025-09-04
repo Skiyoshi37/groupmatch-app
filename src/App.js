@@ -4,6 +4,7 @@ import {
   getAuth, 
   signInWithPhoneNumber, 
   RecaptchaVerifier, 
+  PhoneAuthProvider,
   signOut,
   onAuthStateChanged 
 } from 'firebase/auth';
@@ -75,25 +76,6 @@ function App() {
   const [pendingVotes, setPendingVotes] = useState([]);
   const [matches, setMatches] = useState([]);
 
-  // Auth listener
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setUser(user);
-        await loadUserData(user.uid);
-      } else {
-        setUser(null);
-        setCurrentScreen('auth');
-        setUserProfile(null);
-        setUserTeams([]);
-        setActiveTeam(null);
-      }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [loadUserData]);
-
   // Load user data
   const loadUserData = useCallback(async (userId) => {
     try {
@@ -120,6 +102,25 @@ function App() {
       console.error('Error loading user data:', error);
     }
   }, []);
+
+  // Auth listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setUser(user);
+        await loadUserData(user.uid);
+      } else {
+        setUser(null);
+        setCurrentScreen('auth');
+        setUserProfile(null);
+        setUserTeams([]);
+        setActiveTeam(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [loadUserData]);
 
   // Load user's teams
   const loadUserTeams = async (userId) => {
@@ -206,16 +207,63 @@ function App() {
     const sendVerificationCode = async () => {
       if (!phoneNumber) return;
       
+      // Format phone number to ensure it starts with +
+      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : '+' + phoneNumber.replace(/^\+/, '');
+      
+      // For development/testing purposes, check if this is a test number FIRST
+      if (formattedPhone === '+15005550001' || formattedPhone === '+15005550006') {
+        console.log('Using test phone number, simulating verification');
+        setIsLoading(true);
+        // Simulate loading delay
+        setTimeout(() => {
+          setVerificationId('test-verification-id');
+          setStep('verify');
+          setIsLoading(false);
+        }, 1000);
+        return;
+      }
+      
       setIsLoading(true);
       try {
+        // Clean up any existing recaptcha
+        if (window.recaptchaVerifier) {
+          window.recaptchaVerifier.clear();
+          window.recaptchaVerifier = null;
+        }
+        
         setupRecaptcha();
         const appVerifier = window.recaptchaVerifier;
-        const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+        
+        console.log('Attempting to send verification to:', formattedPhone);
+        console.log('Firebase Auth instance:', auth);
+        console.log('ReCAPTCHA verifier:', appVerifier);
+        
+        const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+        console.log('Verification sent successfully:', confirmationResult);
         setVerificationId(confirmationResult.verificationId);
         setStep('verify');
       } catch (error) {
-        console.error('Error sending verification code:', error);
-        alert('Error sending verification code. Please try again.');
+        console.error('Detailed error sending verification code:', error);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        
+        let errorMessage = 'Error sending verification code. ';
+        
+        if (error.code === 'auth/invalid-phone-number') {
+          errorMessage += 'Please enter a valid phone number with country code (e.g., +1234567890).';
+        } else if (error.code === 'auth/too-many-requests') {
+          errorMessage += 'Too many requests. Please try again later.';
+        } else if (error.code === 'auth/quota-exceeded') {
+          errorMessage += 'SMS quota exceeded. Please try again later.';
+        } else if (error.code === 'auth/operation-not-allowed') {
+          errorMessage += 'Phone authentication is not enabled. For testing, try +15005550001';
+        } else if (error.code === 'auth/captcha-check-failed') {
+          errorMessage += 'ReCAPTCHA verification failed. Please try again.';
+        } else {
+          errorMessage += `Please check your phone number and try again. (Error: ${error.code})`;
+        }
+        
+        alert(errorMessage);
       }
       setIsLoading(false);
     };
@@ -225,40 +273,82 @@ function App() {
       
       setIsLoading(true);
       try {
-        const credential = auth.PhoneAuthProvider.credential(verificationId, verificationCode);
+        // Handle test verification
+        if (verificationId === 'test-verification-id') {
+          if (verificationCode === '123456' || verificationCode === '654321') {
+            console.log('Test verification successful');
+            setStep('phone'); // Reset for next time
+            setIsLoading(false);
+            setPhoneNumber('');
+            setVerificationCode('');
+            alert('Test verification successful! (In a real app, you would now be signed in)');
+            return;
+          } else {
+            throw new Error('Invalid test code. Use 123456 or 654321 for testing.');
+          }
+        }
+        
+        const credential = PhoneAuthProvider.credential(verificationId, verificationCode);
         await auth.signInWithCredential(credential);
+        console.log('Real verification successful');
+        setStep('phone'); // Reset for next time
       } catch (error) {
         console.error('Error verifying code:', error);
-        alert('Invalid verification code. Please try again.');
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        
+        let errorMessage = 'Invalid verification code. ';
+        if (error.code === 'auth/invalid-verification-code') {
+          errorMessage += 'Please check the code and try again.';
+        } else if (error.code === 'auth/code-expired') {
+          errorMessage += 'The code has expired. Please request a new one.';
+        } else if (error.message.includes('test code')) {
+          errorMessage = error.message;
+        } else {
+          errorMessage += 'Please try again.';
+        }
+        
+        alert(errorMessage);
       }
       setIsLoading(false);
     };
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Users size={32} className="text-white" />
+      <div className="min-h-screen bg-gradient-to-br from-purple-400 via-pink-500 to-red-500 flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Background decorative elements */}
+        <div className="absolute inset-0">
+          <div className="absolute top-20 left-10 w-32 h-32 bg-white bg-opacity-10 rounded-full blur-xl"></div>
+          <div className="absolute bottom-32 right-8 w-24 h-24 bg-white bg-opacity-10 rounded-full blur-lg"></div>
+          <div className="absolute top-1/2 left-1/3 w-16 h-16 bg-white bg-opacity-5 rounded-full blur-md"></div>
+        </div>
+        <div className="bg-white bg-opacity-10 backdrop-blur-lg rounded-3xl border border-white border-opacity-20 p-8 w-full max-w-md relative z-10 shadow-2xl">
+          <div className="text-center mb-10">
+            <div className="w-20 h-20 bg-white bg-opacity-20 rounded-full flex items-center justify-center mx-auto mb-6 backdrop-blur-sm">
+              <Heart size={36} className="text-white" fill="currentColor" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to TeamUp</h1>
-            <p className="text-gray-600">Connect your friend groups with other friend groups</p>
+            <h1 className="text-3xl font-bold text-white mb-3 tracking-tight">Welcome to TeamUp</h1>
+            <p className="text-white text-opacity-90 leading-relaxed mb-2">Connect your friend groups with other<br/>friend groups for amazing experiences</p>
+            <div className="bg-white bg-opacity-10 rounded-lg p-3 text-xs text-white text-opacity-80">
+              <p className="font-medium mb-1">🧪 Testing Mode</p>
+              <p>Use <code className="bg-white bg-opacity-20 px-1 rounded">+15005550001</code> or <code className="bg-white bg-opacity-20 px-1 rounded">+15005550006</code></p>
+              <p>Verification code: <code className="bg-white bg-opacity-20 px-1 rounded">123456</code></p>
+            </div>
           </div>
 
           {step === 'phone' ? (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-white text-opacity-90 mb-2">
                   Phone Number
                 </label>
                 <div className="relative">
-                  <Phone size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <Phone size={20} className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white text-opacity-60" />
                   <input
                     type="tel"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
                     placeholder="+1 (555) 123-4567"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full pl-12 pr-4 py-4 bg-white bg-opacity-20 backdrop-blur-sm border border-white border-opacity-30 rounded-2xl focus:ring-2 focus:ring-white focus:ring-opacity-50 focus:border-transparent text-white placeholder-white placeholder-opacity-60 text-lg"
                   />
                 </div>
               </div>
@@ -266,15 +356,20 @@ function App() {
               <button
                 onClick={sendVerificationCode}
                 disabled={isLoading || !phoneNumber}
-                className="w-full bg-gradient-to-r from-pink-500 to-purple-600 text-white py-3 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:from-pink-600 hover:to-purple-700 transition-all"
+                className="w-full bg-white bg-opacity-20 backdrop-blur-sm text-white py-4 rounded-2xl font-semibold hover:bg-opacity-30 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-lg border border-white border-opacity-30 btn-press"
               >
-                {isLoading ? 'Sending...' : 'Send Verification Code'}
+                {isLoading ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <div className="w-5 h-5 border-2 border-white border-opacity-30 border-t-white rounded-full animate-spin"></div>
+                    <span>Sending...</span>
+                  </div>
+                ) : 'Send Verification Code'}
               </button>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-white text-opacity-90 mb-2">
                   Verification Code
                 </label>
                 <input
@@ -282,21 +377,27 @@ function App() {
                   value={verificationCode}
                   onChange={(e) => setVerificationCode(e.target.value)}
                   placeholder="123456"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-center text-2xl tracking-wider"
+                  className="w-full px-4 py-4 bg-white bg-opacity-20 backdrop-blur-sm border border-white border-opacity-30 rounded-2xl focus:ring-2 focus:ring-white focus:ring-opacity-50 focus:border-transparent text-white placeholder-white placeholder-opacity-60 text-center text-lg tracking-widest"
+                  maxLength={6}
                 />
               </div>
 
               <button
                 onClick={verifyCode}
                 disabled={isLoading || !verificationCode}
-                className="w-full bg-gradient-to-r from-pink-500 to-purple-600 text-white py-3 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:from-pink-600 hover:to-purple-700 transition-all"
+                className="w-full bg-white bg-opacity-20 backdrop-blur-sm text-white py-4 rounded-2xl font-semibold hover:bg-opacity-30 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-lg border border-white border-opacity-30 btn-press"
               >
-                {isLoading ? 'Verifying...' : 'Verify Code'}
+                {isLoading ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <div className="w-5 h-5 border-2 border-white border-opacity-30 border-t-white rounded-full animate-spin"></div>
+                    <span>Verifying...</span>
+                  </div>
+                ) : 'Verify & Continue'}
               </button>
 
               <button
                 onClick={() => setStep('phone')}
-                className="w-full text-purple-600 py-2 font-medium hover:text-purple-700 transition-colors"
+                className="w-full text-white text-opacity-80 py-3 text-center hover:text-opacity-100 font-medium transition-all duration-200"
               >
                 ← Back to Phone Number
               </button>
