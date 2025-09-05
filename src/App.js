@@ -28,12 +28,12 @@ import {
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
-  Heart, 
   Users, 
   MessageCircle, 
   Settings, 
   User, 
   ChevronLeft, 
+  ChevronRight,
   X, 
   Check,
   Camera,
@@ -41,7 +41,14 @@ import {
   Clock,
   Vote,
   MapPin,
-  Phone
+  Phone,
+  Home,
+  UserPlus,
+  MessageSquare,
+  UserCheck,
+  Search,
+  ArrowLeft,
+  ChevronDown
 } from 'lucide-react';
 import './App.css';
 
@@ -62,11 +69,26 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 function App() {
+  // Development Mode - Set to true to bypass auth for testing
+  const DEV_MODE = true;
+  
   // Auth & User State
-  const [user, setUser] = useState(null);
-  const [currentScreen, setCurrentScreen] = useState('auth');
-  const [userProfile, setUserProfile] = useState(null);
+  const [user, setUser] = useState(DEV_MODE ? { uid: 'test-user-dev', phoneNumber: '+1234567890' } : null);
+  const [currentScreen, setCurrentScreen] = useState(DEV_MODE ? 'main' : 'auth');
+  const [userProfile, setUserProfile] = useState(DEV_MODE ? {
+    firstName: 'Test',
+    age: 25,
+    location: 'San Francisco, CA',
+    profileComplete: true,
+    photos: ['/api/placeholder/400/600'],
+    prompts: [
+      { question: 'My ideal weekend involves...', answer: 'Testing this amazing app!' },
+      { question: 'The way to win me over is...', answer: 'Show me cool UI animations' },
+      { question: 'I take pride in...', answer: 'Building awesome experiences' }
+    ]
+  } : null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('discover'); // discover, groups, friends, chats, account
   
   // Teams State
   const [userTeams, setUserTeams] = useState([]);
@@ -75,10 +97,35 @@ function App() {
   // Voting State
   const [pendingVotes, setPendingVotes] = useState([]);
   const [matches, setMatches] = useState([]);
+  
+  // Friends State
+  const [friends, setFriends] = useState([]);
+  const [friendRequests, setFriendRequests] = useState({
+    incoming: [
+      { id: 1, name: 'Sarah Chen', photo: '/api/placeholder/50/50', mutual: 2 },
+      { id: 2, name: 'Mike Johnson', photo: '/api/placeholder/50/50', mutual: 5 },
+      { id: 3, name: 'Emma Davis', photo: '/api/placeholder/50/50', mutual: 1 }
+    ],
+    outgoing: [
+      { id: 4, name: 'Alex Smith', photo: '/api/placeholder/50/50', mutual: 3 }
+    ]
+  });
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showContactsModal, setShowContactsModal] = useState(false);
+  const [showFriendRequestsModal, setShowFriendRequestsModal] = useState(false);
 
   // Load user data
   const loadUserData = useCallback(async (userId) => {
     try {
+      // Handle test users - skip Firestore and go to profile setup
+      if (userId.startsWith('test-user-')) {
+        console.log('Test user detected, going to profile setup');
+        setUserProfile(null); // No existing profile for test user
+        setCurrentScreen('profile-setup');
+        setLoading(false);
+        return;
+      }
+      
       // Load user profile
       const profileDoc = await getDoc(doc(db, 'users', userId));
       if (profileDoc.exists()) {
@@ -105,6 +152,13 @@ function App() {
 
   // Auth listener
   useEffect(() => {
+    if (DEV_MODE) {
+      // Skip Firebase auth in development mode
+      console.log('DEV_MODE: Skipping Firebase auth, using test user');
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setUser(user);
@@ -120,7 +174,7 @@ function App() {
     });
 
     return () => unsubscribe();
-  }, [loadUserData]);
+  }, [loadUserData, DEV_MODE]);
 
   // Load user's teams
   const loadUserTeams = async (userId) => {
@@ -195,12 +249,24 @@ function App() {
 
     const setupRecaptcha = () => {
       if (!window.recaptchaVerifier) {
-        window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-          size: 'invisible',
-          callback: () => {
-            console.log('reCAPTCHA solved');
-          }
-        });
+        try {
+          window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+            size: 'invisible',
+            callback: () => {
+              console.log('reCAPTCHA solved successfully');
+            },
+            'expired-callback': () => {
+              console.log('reCAPTCHA expired');
+            },
+            'error-callback': (error) => {
+              console.error('reCAPTCHA error:', error);
+            }
+          });
+          console.log('reCAPTCHA verifier created successfully');
+        } catch (error) {
+          console.error('Error creating reCAPTCHA verifier:', error);
+          throw error;
+        }
       }
     };
 
@@ -276,12 +342,19 @@ function App() {
         // Handle test verification
         if (verificationId === 'test-verification-id') {
           if (verificationCode === '123456' || verificationCode === '654321') {
-            console.log('Test verification successful');
-            setStep('phone'); // Reset for next time
+            console.log('Test verification successful - simulating user login');
+            
+            // Create a mock authenticated user
+            const testUser = {
+              uid: 'test-user-' + Date.now(),
+              phoneNumber: phoneNumber.startsWith('+') ? phoneNumber : '+' + phoneNumber.replace(/^\+/, ''),
+            };
+            
+            // Simulate the auth state change that would normally happen with Firebase
+            setUser(testUser);
+            setCurrentScreen('loading'); // This will trigger the loadUserData flow
             setIsLoading(false);
-            setPhoneNumber('');
-            setVerificationCode('');
-            alert('Test verification successful! (In a real app, you would now be signed in)');
+            
             return;
           } else {
             throw new Error('Invalid test code. Use 123456 or 654321 for testing.');
@@ -314,7 +387,7 @@ function App() {
     };
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-400 via-pink-500 to-red-500 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="min-h-screen bg-gradient-to-br from-orange-400 via-amber-500 to-yellow-500 flex items-center justify-center p-4 relative overflow-hidden">
         {/* Background decorative elements */}
         <div className="absolute inset-0">
           <div className="absolute top-20 left-10 w-32 h-32 bg-white bg-opacity-10 rounded-full blur-xl"></div>
@@ -324,7 +397,7 @@ function App() {
         <div className="bg-white bg-opacity-10 backdrop-blur-lg rounded-3xl border border-white border-opacity-20 p-8 w-full max-w-md relative z-10 shadow-2xl">
           <div className="text-center mb-10">
             <div className="w-20 h-20 bg-white bg-opacity-20 rounded-full flex items-center justify-center mx-auto mb-6 backdrop-blur-sm">
-              <Heart size={36} className="text-white" fill="currentColor" />
+              <Users size={36} className="text-white" />
             </div>
             <h1 className="text-3xl font-bold text-white mb-3 tracking-tight">Welcome to TeamUp</h1>
             <p className="text-white text-opacity-90 leading-relaxed mb-2">Connect your friend groups with other<br/>friend groups for amazing experiences</p>
@@ -437,30 +510,162 @@ function App() {
       location: '',
       photos: [],
       prompts: [
-        { question: "A perfect day for me is...", answer: '' },
-        { question: "I'm looking for...", answer: '' },
-        { question: "My ideal night out is...", answer: '' }
+        { question: "My ideal weekend involves...", answer: '' },
+        { question: "I'm always down to...", answer: '' },
+        { question: "We should hang out if...", answer: '' }
       ]
     });
     const [uploading, setUploading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [selectedPromptIndex, setSelectedPromptIndex] = useState(null);
+    const [showPromptSelector, setShowPromptSelector] = useState(false);
 
     const availablePrompts = [
-      "A perfect day for me is...",
-      "I'm looking for...",
-      "My ideal night out is...",
-      "The way to my heart is...",
-      "I'm overly competitive about...",
-      "My greatest strength is...",
-      "A random fact I love is...",
-      "My simple pleasures...",
-      "The dorkiest thing about me is...",
-      "I want someone who...",
-      "Together we could...",
-      "I'm convinced that...",
-      "Green flags I look for...",
-      "Red flags for me are..."
+      // Fun & Social
+      "My ideal weekend involves...",
+      "I'm always down to...",
+      "The best group activity is...",
+      "My perfect group night is...",
+      "My go-to hangout spot is...",
+      "We should hang out if...",
+      "I can teach your group...",
+      "Let's bond over...",
+      "Together we could explore...",
+      "The group activity I'm most excited to try is...",
+      "I'm looking for a crew that's into...",
+      "My friends and I love to...",
+      
+      // Personality & Vibes
+      "My friends would say I'm...",
+      "I'm always the friend who...",
+      "My energy is...",
+      "I get way too excited about...",
+      "I'm the type of person who...",
+      "You'll know we're a good match if you...",
+      "I bring to the group...",
+      "My vibe is...",
+      "I'm really good at...",
+      "People always come to me for...",
+      
+      // Interests & Hobbies
+      "I'm obsessed with...",
+      "I'm currently into...",
+      "I could talk for hours about...",
+      "My hidden talent is...",
+      "I'm weirdly passionate about...",
+      "The skill I want to learn is...",
+      "My favorite way to spend a free afternoon is...",
+      "I collect...",
+      "My guilty pleasure is...",
+      "The documentary I'll make everyone watch is about...",
+      
+      // Activities & Adventures
+      "The adventure on my bucket list is...",
+      "I'm always up for...",
+      "The best concert I've been to was...",
+      "My favorite local spot that nobody knows about is...",
+      "The road trip I want to take is...",
+      "I wish more people were into...",
+      "The festival/event I never miss is...",
+      "My dream group vacation would be...",
+      "The activity that always makes me happy is...",
+      "I want to find people who will...",
+      
+      // Food & Drinks
+      "My favorite type of cuisine is...",
+      "The restaurant I'm always recommending is...",
+      "I'm a regular at...",
+      "My go-to drink order is...",
+      "I can make the best...",
+      "The food trend I'm obsessed with is...",
+      "My comfort food is...",
+      "The dish I'm dying to try is...",
+      "I judge restaurants by their...",
+      "My hot take on food is...",
+      
+      // Creative & Intellectual
+      "The book that changed my perspective was...",
+      "My current creative project is...",
+      "I'm learning...",
+      "The podcast I'm binge-listening to is...",
+      "My unpopular opinion is...",
+      "The skill that impresses people most is...",
+      "I'm a surprisingly good...",
+      "My favorite way to be creative is...",
+      "The YouTube rabbit hole I went down recently was...",
+      "I wish I could spend more time...",
+      
+      // Lifestyle & Values
+      "My morning routine includes...",
+      "I'm working on becoming better at...",
+      "The cause I care most about is...",
+      "My biggest pet peeve is...",
+      "I'm trying to...",
+      "My life philosophy is...",
+      "The habit that changed my life was...",
+      "I believe everyone should try...",
+      "My definition of a perfect day is...",
+      "The thing I want to do more of this year is...",
+      
+      // Random & Quirky
+      "The weirdest compliment I've ever received is...",
+      "My most useless skill is...",
+      "The conspiracy theory I secretly believe is...",
+      "My biggest fear is...",
+      "The strangest thing in my search history is...",
+      "I have too many opinions about...",
+      "My childhood obsession was...",
+      "The hill I will die on is...",
+      "My weirdest flex is...",
+      "The thing that makes me irrationally happy is...",
+      
+      // Connection & Friendship
+      "I'm looking for people who...",
+      "The quality I value most in friends is...",
+      "I'm the friend who always...",
+      "My love language is...",
+      "I bond with people over...",
+      "The friend group dynamic I thrive in is...",
+      "I show I care by...",
+      "My ideal friend group is...",
+      "I connect best with people who...",
+      "The way to my heart is..."
     ];
+
+    // Image compression utility
+    const compressImage = (file, maxWidth = 800, maxHeight = 1200, quality = 0.8) => {
+      return new Promise((resolve) => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        img.onload = () => {
+          // Calculate new dimensions maintaining aspect ratio
+          let { width, height } = img;
+          
+          if (width > height) {
+            if (width > maxWidth) {
+              height = (height * maxWidth) / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = (width * maxHeight) / height;
+              height = maxHeight;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          
+          // Draw and compress
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(resolve, 'image/jpeg', quality);
+        };
+        
+        img.src = URL.createObjectURL(file);
+      });
+    };
 
     const handlePhotoUpload = async (event) => {
       const file = event.target.files[0];
@@ -471,19 +676,56 @@ function App() {
         return;
       }
 
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        alert('Please select an image file');
+        return;
+      }
+
+      // Validate file size (10MB max before compression)
+      if (file.size > 10 * 1024 * 1024) {
+        alert('Image size should be less than 10MB');
+        return;
+      }
+
       setUploading(true);
       try {
-        const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}`);
-        const snapshot = await uploadBytes(storageRef, file);
-        const downloadURL = await getDownloadURL(snapshot.ref);
-        
+        // Show immediate preview while uploading
+        const preview = URL.createObjectURL(file);
         setFormData(prev => ({
           ...prev,
-          photos: [...prev.photos, downloadURL]
+          photos: [...prev.photos, preview]
         }));
+
+        // Compress image
+        const compressedFile = await compressImage(file);
+        
+        // Upload compressed image
+        const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}.jpg`);
+        const snapshot = await uploadBytes(storageRef, compressedFile);
+        const downloadURL = await getDownloadURL(snapshot.ref);
+        
+        // Replace preview with actual URL
+        setFormData(prev => ({
+          ...prev,
+          photos: prev.photos.map((photo, index) => 
+            index === prev.photos.length - 1 ? downloadURL : photo
+          )
+        }));
+
+        // Clean up preview URL
+        URL.revokeObjectURL(preview);
+        
       } catch (error) {
         console.error('Error uploading photo:', error);
-        alert('Error uploading photo');
+        
+        // Remove preview on error
+        setFormData(prev => ({
+          ...prev,
+          photos: prev.photos.slice(0, -1)
+        }));
+        
+        alert('Error uploading photo. Please try again.');
       }
       setUploading(false);
     };
@@ -511,6 +753,26 @@ function App() {
           i === index ? { question, answer: '' } : prompt
         )
       }));
+      setShowPromptSelector(false);
+    };
+
+    const reorderPhotos = (startIndex, endIndex) => {
+      const newPhotos = [...formData.photos];
+      const [removed] = newPhotos.splice(startIndex, 1);
+      newPhotos.splice(endIndex, 0, removed);
+      setFormData(prev => ({ ...prev, photos: newPhotos }));
+    };
+
+    const reorderPrompts = (startIndex, endIndex) => {
+      const newPrompts = [...formData.prompts];
+      const [removed] = newPrompts.splice(startIndex, 1);
+      newPrompts.splice(endIndex, 0, removed);
+      setFormData(prev => ({ ...prev, prompts: newPrompts }));
+    };
+
+    const openPromptSelector = (index) => {
+      setSelectedPromptIndex(index);
+      setShowPromptSelector(true);
     };
 
     const saveProfile = async () => {
@@ -521,12 +783,25 @@ function App() {
           userId: user.uid,
           phone: user.phoneNumber,
           profileComplete: true,
-          createdAt: serverTimestamp(),
+          createdAt: new Date().toISOString(), // Use ISO string for test users
           active: true,
           verified: false
         };
 
-        await setDoc(doc(db, 'users', user.uid), profileData);
+        // Handle test users - don't save to Firestore
+        if (user.uid.startsWith('test-user-')) {
+          console.log('Test user profile created:', profileData);
+          setUserProfile({ id: user.uid, ...profileData });
+          setCurrentScreen('home');
+          setSaving(false);
+          return;
+        }
+
+        // Real users - save to Firestore
+        await setDoc(doc(db, 'users', user.uid), {
+          ...profileData,
+          createdAt: serverTimestamp() // Use serverTimestamp for real users
+        });
         setUserProfile({ id: user.uid, ...profileData });
         setCurrentScreen('home');
       } catch (error) {
@@ -560,17 +835,27 @@ function App() {
     };
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
+      <div className="min-h-screen bg-gray-50">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-4 py-4">
-          <div className="flex items-center justify-between max-w-md mx-auto">
-            <h1 className="text-xl font-bold text-gray-900">Complete Profile</h1>
-            <div className="flex space-x-2">
+        <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
+          <div className="flex items-center justify-between max-w-lg mx-auto">
+            <button 
+              onClick={() => step > 1 ? setStep(step - 1) : setCurrentScreen('home')}
+              className="p-2 hover:bg-gray-100 rounded-full"
+            >
+              <ArrowLeft size={24} className="text-gray-700" />
+            </button>
+            <h1 className="text-lg font-semibold text-gray-900">
+              {step === 1 && "About You"}
+              {step === 2 && "Your Photos"}
+              {step === 3 && "Show Your Personality"}
+            </h1>
+            <div className="flex space-x-1">
               {[1, 2, 3].map((s) => (
                 <div 
                   key={s}
-                  className={`w-3 h-3 rounded-full ${
-                    s <= step ? 'bg-purple-600' : 'bg-gray-300'
+                  className={`w-2 h-2 rounded-full transition-colors ${
+                    s <= step ? 'bg-orange-500' : 'bg-gray-300'
                   }`} 
                 />
               ))}
@@ -594,7 +879,7 @@ function App() {
                         type="text"
                         value={formData.firstName}
                         onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                         placeholder="Your first name"
                       />
                     </div>
@@ -609,7 +894,7 @@ function App() {
                         max="99"
                         value={formData.age}
                         onChange={(e) => setFormData(prev => ({ ...prev, age: e.target.value }))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                         placeholder="Your age"
                       />
                     </div>
@@ -624,7 +909,7 @@ function App() {
                           type="text"
                           value={formData.location}
                           onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
-                          className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                           placeholder="Chicago, IL"
                         />
                       </div>
@@ -637,7 +922,7 @@ function App() {
                       <textarea
                         value={formData.bio}
                         onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent h-24 resize-none"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent h-24 resize-none"
                         placeholder="Tell people a bit about yourself..."
                       />
                     </div>
@@ -656,36 +941,38 @@ function App() {
 
             {step === 2 && (
               <div className="space-y-6">
-                <div className="bg-white rounded-2xl p-6 shadow-sm">
-                  <h2 className="text-lg font-semibold mb-4">Add Your Photos</h2>
-                  <p className="text-gray-600 mb-6">Add 3-6 photos that show your personality. First photo will be your main photo.</p>
-                  
-                  <div className="grid grid-cols-2 gap-4 mb-6">
-                    {[...Array(6)].map((_, index) => (
-                      <div key={index} className="aspect-square">
-                        {formData.photos[index] ? (
-                          <div className="relative w-full h-full">
+                <div className="text-center mb-6">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">Show yourself off</h2>
+                  <p className="text-gray-600">Add 3-6 photos. Tap and hold to reorder.</p>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Main Photo Section */}
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+                    <div className="p-4 border-b border-gray-100">
+                      <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Main Photo</h3>
+                    </div>
+                    <div className="p-4">
+                      <div className="aspect-[3/4] max-w-[200px] mx-auto">
+                        {formData.photos[0] ? (
+                          <div className="relative w-full h-full group">
                             <img 
-                              src={formData.photos[index]} 
-                              alt="Profile"
+                              src={formData.photos[0]} 
+                              alt="Main profile"
                               className="w-full h-full object-cover rounded-lg"
                             />
                             <button
-                              onClick={() => removePhoto(index)}
-                              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm"
+                              onClick={() => removePhoto(0)}
+                              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm opacity-0 group-hover:opacity-100 transition-opacity"
                             >
                               ×
                             </button>
-                            {index === 0 && (
-                              <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
-                                Main
-                              </div>
-                            )}
                           </div>
                         ) : (
-                          <label className="w-full h-full border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-purple-300 transition-colors">
-                            <Camera size={24} className="text-gray-400 mb-2" />
-                            <span className="text-sm text-gray-500">Add Photo</span>
+                          <label className="w-full h-full border-2 border-dashed border-orange-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-orange-400 transition-colors">
+                            <Camera size={32} className="text-orange-400 mb-3" />
+                            <span className="text-sm font-medium text-gray-700">Add your main photo</span>
+                            <span className="text-xs text-gray-500 mt-1">This appears first on your profile</span>
                             <input
                               type="file"
                               accept="image/*"
@@ -696,34 +983,83 @@ function App() {
                           </label>
                         )}
                       </div>
-                    ))}
+                    </div>
+                  </div>
+
+                  {/* Additional Photos */}
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+                    <div className="p-4 border-b border-gray-100">
+                      <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Additional Photos</h3>
+                    </div>
+                    <div className="p-4">
+                      <div className="grid grid-cols-2 gap-3">
+                        {[...Array(5)].map((_, index) => {
+                          const photoIndex = index + 1;
+                          return (
+                            <div key={photoIndex} className="aspect-[3/4]">
+                              {formData.photos[photoIndex] ? (
+                                <div className="relative w-full h-full group">
+                                  <img 
+                                    src={formData.photos[photoIndex]} 
+                                    alt="Profile"
+                                    className="w-full h-full object-cover rounded-lg"
+                                  />
+                                  <button
+                                    onClick={() => removePhoto(photoIndex)}
+                                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                  >
+                                    ×
+                                  </button>
+                                  <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                                    {photoIndex + 1}
+                                  </div>
+                                </div>
+                              ) : (
+                                <label className="w-full h-full border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-orange-300 transition-colors">
+                                  <Plus size={20} className="text-gray-400 mb-1" />
+                                  <span className="text-xs text-gray-500">Add Photo</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handlePhotoUpload}
+                                    className="hidden"
+                                    disabled={uploading}
+                                  />
+                                </label>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
 
                   {uploading && (
-                    <div className="text-center py-4">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
-                      <p className="text-gray-600 mt-2">Uploading photo...</p>
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
+                      <div className="flex items-center justify-center space-x-3 mb-2">
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-600"></div>
+                        <p className="text-orange-800 font-medium text-sm">Processing photo...</p>
+                      </div>
+                      <p className="text-orange-600 text-xs">Compressing and uploading</p>
                     </div>
                   )}
 
-                  <p className="text-sm text-gray-500 text-center">
-                    {formData.photos.length} of 6 photos • Minimum 3 required
-                  </p>
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">
+                      <span className={`font-semibold ${formData.photos.length >= 3 ? 'text-green-600' : 'text-orange-600'}`}>
+                        {formData.photos.length}
+                      </span> of 6 photos • Minimum 3 required
+                    </p>
+                  </div>
                 </div>
 
-                <div className="flex space-x-3">
-                  <button
-                    onClick={() => setStep(1)}
-                    className="flex-1 bg-gray-200 text-gray-800 py-4 rounded-xl font-semibold"
-                  >
-                    Back
-                  </button>
+                <div className="pt-4">
                   <button
                     onClick={() => setStep(3)}
                     disabled={!canProceedToNextStep()}
-                    className="flex-1 bg-gradient-to-r from-pink-500 to-purple-600 text-white py-4 rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-orange-600 text-white py-4 rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-orange-700 transition-colors"
                   >
-                    Next: Prompts
+                    {formData.photos.length >= 3 ? "Next: Add Prompts" : `Add ${3 - formData.photos.length} more photos`}
                   </button>
                 </div>
               </div>
@@ -731,53 +1067,92 @@ function App() {
 
             {step === 3 && (
               <div className="space-y-6">
-                <div className="bg-white rounded-2xl p-6 shadow-sm">
-                  <h2 className="text-lg font-semibold mb-4">Answer Some Prompts</h2>
-                  <p className="text-gray-600 mb-6">Help others get to know you better with thoughtful answers.</p>
-                  
-                  <div className="space-y-6">
-                    {formData.prompts.map((prompt, index) => (
-                      <div key={index} className="space-y-3">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Prompt {index + 1}
-                          </label>
-                          <select
-                            value={prompt.question}
-                            onChange={(e) => changePromptQuestion(index, e.target.value)}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                          >
-                            {availablePrompts.map((q) => (
-                              <option key={q} value={q}>{q}</option>
-                            ))}
-                          </select>
-                        </div>
+                <div className="text-center mb-6">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">Show your personality</h2>
+                  <p className="text-gray-600">Answer 3 prompts to help others get to know you</p>
+                </div>
+
+                <div className="space-y-4">
+                  {formData.prompts.map((prompt, index) => (
+                    <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-100">
+                      <div className="p-4">
+                        <button
+                          onClick={() => openPromptSelector(index)}
+                          className="w-full text-left mb-4 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-gray-900">
+                              {prompt.question}
+                            </span>
+                            <ChevronDown size={16} className="text-gray-500" />
+                          </div>
+                        </button>
+                        
                         <textarea
                           value={prompt.answer}
                           onChange={(e) => updatePrompt(index, e.target.value)}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent h-20 resize-none"
-                          placeholder="Your answer here..."
-                          maxLength={150}
+                          className="w-full px-0 py-2 border-0 focus:ring-0 text-lg resize-none placeholder-gray-400"
+                          placeholder="Type your answer here..."
+                          maxLength={180}
+                          rows={3}
+                          style={{ fontSize: '16px', lineHeight: '1.4' }}
                         />
-                        <div className="text-right text-xs text-gray-400">
-                          {prompt.answer.length}/150
+                        
+                        <div className="flex items-center justify-between text-xs text-gray-400 mt-2">
+                          <span>Tap to change prompt</span>
+                          <span className={prompt.answer.length > 160 ? 'text-orange-600' : ''}>
+                            {prompt.answer.length}/180
+                          </span>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="flex space-x-3">
-                  <button
-                    onClick={() => setStep(2)}
-                    className="flex-1 bg-gray-200 text-gray-800 py-4 rounded-xl font-semibold"
-                  >
-                    Back
-                  </button>
+                {/* Prompt Selector Modal */}
+                {showPromptSelector && selectedPromptIndex !== null && (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end justify-center p-4">
+                    <div className="bg-white rounded-t-xl w-full max-w-md max-h-[80vh] overflow-hidden">
+                      <div className="p-4 border-b border-gray-200 sticky top-0 bg-white">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-lg font-semibold">Choose a prompt</h3>
+                          <button
+                            onClick={() => setShowPromptSelector(false)}
+                            className="p-2 hover:bg-gray-100 rounded-full"
+                          >
+                            <X size={20} className="text-gray-500" />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="overflow-y-auto">
+                        <div className="p-2">
+                          {availablePrompts.map((promptQuestion) => (
+                            <button
+                              key={promptQuestion}
+                              onClick={() => changePromptQuestion(selectedPromptIndex, promptQuestion)}
+                              className={`w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors mb-1 ${
+                                formData.prompts[selectedPromptIndex]?.question === promptQuestion 
+                                  ? 'bg-orange-50 border border-orange-200' 
+                                  : ''
+                              }`}
+                            >
+                              <span className="text-sm font-medium text-gray-900">
+                                {promptQuestion}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-4">
                   <button
                     onClick={saveProfile}
                     disabled={!canSaveProfile() || saving}
-                    className="flex-1 bg-gradient-to-r from-pink-500 to-purple-600 text-white py-4 rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-orange-600 text-white py-4 rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-orange-700 transition-colors"
                   >
                     {saving ? 'Creating Profile...' : 'Complete Profile'}
                   </button>
@@ -917,7 +1292,7 @@ function App() {
                     type="text"
                     value={teamName}
                     onChange={(e) => setTeamName(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     placeholder="The Squad, Weekend Warriors, etc."
                     maxLength={50}
                   />
@@ -931,7 +1306,7 @@ function App() {
                   <select
                     value={lookingFor}
                     onChange={(e) => setLookingFor(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                   >
                     <option value="">Select group size</option>
                     <option value="1">1 person</option>
@@ -978,7 +1353,7 @@ function App() {
                     <select
                       value={invite.type}
                       onChange={(e) => updateInvite(index, 'type', e.target.value)}
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     >
                       <option value="phone">📱 Phone</option>
                       <option value="email">✉️ Email</option>
@@ -993,7 +1368,7 @@ function App() {
                         invite.type === 'email' ? 'friend@email.com' :
                         '@username'
                       }
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     />
                     {invites.length > 1 && (
                       <button
@@ -1008,7 +1383,7 @@ function App() {
                 
                 <button
                   onClick={addInvite}
-                  className="flex items-center space-x-2 text-purple-600 hover:text-purple-700"
+                  className="flex items-center space-x-2 text-orange-600 hover:text-purple-700"
                 >
                   <Plus size={16} />
                   <span>Add another friend</span>
@@ -1068,7 +1443,7 @@ function App() {
                     
                     <button
                       onClick={() => setShowShareModal(false)}
-                      className="w-full bg-purple-50 text-purple-600 py-3 rounded-lg font-semibold"
+                      className="w-full bg-purple-50 text-orange-600 py-3 rounded-lg font-semibold"
                     >
                       Invite More Friends Later
                     </button>
@@ -1098,7 +1473,7 @@ function App() {
             {pendingVotes.length > 0 && (
               <button 
                 onClick={() => setCurrentScreen('voting')}
-                className="relative p-2 text-purple-600 hover:bg-purple-50 rounded-full"
+                className="relative p-2 text-orange-600 hover:bg-purple-50 rounded-full"
               >
                 <Vote size={20} />
                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
@@ -1155,13 +1530,13 @@ function App() {
               disabled={!activeTeam}
               className="bg-gradient-to-r from-pink-500 to-purple-600 text-white p-6 rounded-xl text-center disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Heart size={32} className="mx-auto mb-2" />
+              <Search size={32} className="mx-auto mb-2" />
               <p className="font-semibold">Discover Teams</p>
             </button>
 
             <button
               onClick={() => setCurrentScreen('create-team')}
-              className="bg-white border-2 border-dashed border-gray-300 text-gray-600 p-6 rounded-xl text-center hover:border-purple-300 hover:text-purple-600 transition-colors"
+              className="bg-white border-2 border-dashed border-gray-300 text-gray-600 p-6 rounded-xl text-center hover:border-purple-300 hover:text-orange-600 transition-colors"
             >
               <Plus size={32} className="mx-auto mb-2" />
               <p className="font-semibold">Create Team</p>
@@ -1420,7 +1795,7 @@ function App() {
           
           <div className="flex items-center justify-center p-8">
             <div className="text-center">
-              <Heart size={48} className="mx-auto mb-4 text-gray-400" />
+              <UserCheck size={48} className="mx-auto mb-4 text-gray-400" />
               <h2 className="text-xl font-bold text-gray-900 mb-2">No more teams!</h2>
               <p className="text-gray-600 mb-6">Check back later for more teams to discover.</p>
               <button
@@ -1531,7 +1906,7 @@ function App() {
                 onClick={() => handleSwipe('like')}
                 className="w-16 h-16 bg-gradient-to-r from-pink-500 to-purple-600 rounded-full flex items-center justify-center hover:from-pink-600 hover:to-purple-700 transition-colors shadow-lg"
               >
-                <Heart size={24} className="text-white" />
+                <Check size={24} className="text-white" />
               </button>
             </div>
 
@@ -2084,7 +2459,7 @@ function App() {
                 <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${
                     isOwn 
-                      ? 'bg-purple-600 text-white' 
+                      ? 'bg-orange-500 text-white' 
                       : 'bg-white text-gray-900 border border-gray-200'
                   }`}>
                     {!isOwn && (
@@ -2114,7 +2489,7 @@ function App() {
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                 placeholder="Type a message..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:ring-2 focus:ring-orange-500 focus:border-transparent"
               />
               <button
                 onClick={sendMessage}
@@ -2223,30 +2598,31 @@ function App() {
     };
 
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="bg-white border-b border-gray-200 px-4 py-4">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-stone-50 page-transition">
+        {/* Elite Header */}
+        <div className="backdrop-blur-xl bg-white/90 border-b border-white/20 px-6 py-4 sticky top-0 z-10 safe-area-top">
           <div className="flex items-center justify-between max-w-md mx-auto">
             <button
               onClick={() => setCurrentScreen('home')}
-              className="p-2 text-gray-600 hover:bg-gray-50 rounded-full"
+              className="p-3 text-gray-600 hover:bg-white/60 rounded-xl transition-all"
             >
-              <ChevronLeft size={20} />
+              <ChevronLeft size={22} />
             </button>
-            <h1 className="text-xl font-bold text-gray-900">Settings</h1>
+            <h1 className="text-xl font-bold text-elite-heading">Settings</h1>
             <button
               onClick={savePreferences}
               disabled={saving}
-              className="text-purple-600 font-semibold disabled:opacity-50"
+              className="btn-elite gradient-secondary text-white px-6 py-2 rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
           </div>
         </div>
 
-        <div className="p-4">
-          <div className="max-w-md mx-auto space-y-6">
+        <div className="px-6 py-8">
+          <div className="max-w-md mx-auto space-y-6 fade-in-up">
             {/* Account Section */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="card-premium p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Account</h2>
               
               <div className="space-y-4">
@@ -2269,7 +2645,7 @@ function App() {
                   </div>
                   <button
                     onClick={() => setCurrentScreen('profile-setup')}
-                    className="text-purple-600 text-sm font-semibold"
+                    className="text-premium bg-orange-50 px-3 py-1 rounded-lg text-sm font-semibold hover:bg-orange-100 transition-all"
                   >
                     Edit Profile
                   </button>
@@ -2277,7 +2653,7 @@ function App() {
 
                 <button
                   onClick={requestLocationPermission}
-                  className="w-full flex items-center justify-center space-x-2 bg-blue-50 text-blue-700 py-3 rounded-lg font-semibold hover:bg-blue-100 transition-colors"
+                  className="w-full flex items-center justify-center space-x-2 bg-gradient-ocean text-white py-3 rounded-xl font-semibold hover:scale-105 transition-all shadow-sm"
                 >
                   <MapPin size={20} />
                   <span>Update Current Location</span>
@@ -2286,7 +2662,7 @@ function App() {
             </div>
 
             {/* Discovery Preferences */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="card-premium p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Discovery Preferences</h2>
               
               <div className="space-y-6">
@@ -2362,7 +2738,7 @@ function App() {
                         value="everyone"
                         checked={preferences.showMe === 'everyone'}
                         onChange={(e) => setPreferences(prev => ({ ...prev, showMe: e.target.value }))}
-                        className="text-purple-600"
+                        className="text-orange-600"
                       />
                       <span className="ml-2 text-gray-900">Everyone</span>
                     </label>
@@ -2373,7 +2749,7 @@ function App() {
                         value="teams-only"
                         checked={preferences.showMe === 'teams-only'}
                         onChange={(e) => setPreferences(prev => ({ ...prev, showMe: e.target.value }))}
-                        className="text-purple-600"
+                        className="text-orange-600"
                       />
                       <span className="ml-2 text-gray-900">Teams Only</span>
                     </label>
@@ -2383,7 +2759,7 @@ function App() {
             </div>
 
             {/* Notifications */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="card-premium p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Notifications</h2>
               
               <div className="space-y-4">
@@ -2438,7 +2814,7 @@ function App() {
             </div>
 
             {/* Team Management */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="card-premium p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Team Management</h2>
               
               <div className="space-y-3">
@@ -2455,13 +2831,13 @@ function App() {
                   className="w-full text-left p-3 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
                 >
                   <p className="font-medium text-purple-900">Create New Team</p>
-                  <p className="text-sm text-purple-600">Start a new team with friends</p>
+                  <p className="text-sm text-orange-600">Start a new team with friends</p>
                 </button>
               </div>
             </div>
 
             {/* Support & Legal */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="card-premium p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Support & Legal</h2>
               
               <div className="space-y-3">
@@ -2483,18 +2859,18 @@ function App() {
             </div>
 
             {/* Danger Zone */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-red-200">
+            <div className="card-premium p-6 border border-red-200/50">
               <h2 className="text-lg font-semibold text-red-600 mb-4">Account Actions</h2>
               
               <div className="space-y-3">
                 <button
                   onClick={handleLogout}
-                  className="w-full bg-red-500 text-white py-3 rounded-lg font-semibold hover:bg-red-600 transition-colors"
+                  className="w-full bg-gradient-fire text-white py-3 rounded-xl font-semibold hover:scale-105 transition-all shadow-lg"
                 >
                   Log Out
                 </button>
 
-                <button className="w-full text-red-600 py-2 text-sm font-medium hover:bg-red-50 rounded-lg transition-colors">
+                <button className="w-full text-red-600 py-2 text-sm font-medium hover:bg-red-50 rounded-xl transition-all hover:scale-105">
                   Delete Account
                 </button>
               </div>
@@ -2578,7 +2954,7 @@ function App() {
                 />
                 <button
                   onClick={copyLink}
-                  className="px-4 py-2 bg-purple-600 text-white rounded font-semibold text-sm"
+                  className="px-4 py-2 bg-orange-500 text-white rounded font-semibold text-sm"
                 >
                   Copy
                 </button>
@@ -2635,31 +3011,882 @@ function App() {
     );
   };
 
-  // Screen Router
-  const renderScreen = () => {
-    switch (currentScreen) {
-      case 'auth':
-        return <PhoneAuthScreen />;
-      case 'profile-setup':
-        return <ProfileSetupScreen />;
-      case 'home':
-        return <HomeScreen />;
-      case 'create-team':
-        return <CreateTeamScreen />;
+  // Bottom Navigation Component
+  const BottomNav = () => {
+    const tabs = [
+      { id: 'discover', label: 'Discover', icon: Search },
+      { id: 'groups', label: 'Groups', icon: Users },
+      { id: 'friends', label: 'Friends', icon: UserPlus },
+      { id: 'chats', label: 'Chats', icon: MessageSquare },
+      { id: 'account', label: 'Account', icon: Settings }
+    ];
+
+    // Debug logging to track state
+    console.log('Current activeTab in BottomNav:', activeTab);
+
+    return (
+      <div className="fixed bottom-0 left-0 right-0 backdrop-blur-xl bg-white/95 border-t border-white/20 px-4 py-3 safe-area-bottom shadow-lg">
+        <div className="flex justify-around max-w-md mx-auto">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  console.log('Clicking tab:', tab.id);
+                  setActiveTab(tab.id);
+                }}
+                className={`relative flex flex-col items-center justify-center px-4 py-2 rounded-2xl transition-all duration-300 ${
+                  isActive 
+                    ? 'text-gray-700 scale-105 bg-gray-100/80 shadow-lg' 
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/50'
+                }`}
+              >
+                <div className="flex flex-col items-center">
+                  <Icon size={22} className={isActive ? 'mb-1' : ''} />
+                  <span className={`text-xs font-semibold ${isActive ? 'opacity-100' : 'opacity-80'}`}>
+                    {tab.label}
+                  </span>
+                </div>
+                {isActive && (
+                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full shadow-sm"></div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // Main App Content
+  const renderMainContent = () => {
+    switch (activeTab) {
       case 'discover':
-        return <TeamDiscoveryScreen />;
-      case 'voting':
-        return <VotingScreen />;
-      case 'chat':
-        return <GroupChatScreen />;
-      case 'settings':
-        return <SettingsScreen />;
+        return <DiscoverScreen />;
+      case 'groups':
+        return <GroupsScreen />;
+      case 'friends':
+        return <FriendsScreen />;
+      case 'chats':
+        return <ChatsScreen />;
+      case 'account':
+        return <AccountScreen />;
       default:
-        return <HomeScreen />;
+        return <DiscoverScreen />;
     }
   };
 
-  return <div className="App">{renderScreen()}</div>;
+  // Screen Router
+  const renderScreen = () => {
+    if (!user) {
+      return <PhoneAuthScreen />;
+    }
+
+    if (currentScreen === 'profile-setup') {
+      return <ProfileSetupScreen />;
+    }
+
+    // Main app with bottom navigation
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="pb-20"> {/* Space for bottom nav */}
+          {renderMainContent()}
+        </div>
+        <BottomNav />
+      </div>
+    );
+  };
+
+  // Tab 1: Discover Screen (Traditional dating app feed)
+  const DiscoverScreen = () => {
+    const [currentProfile, setCurrentProfile] = useState(0);
+    const [profiles] = useState([
+      {
+        id: 1,
+        name: "Alex, 24",
+        photos: ["/api/placeholder/400/600"],
+        bio: "Love hiking and trying new restaurants",
+        prompts: [
+          { question: "My ideal weekend involves...", answer: "Exploring new trails and brunch spots" },
+          { question: "I'm always down to...", answer: "Try a new adventure or activity" }
+        ]
+      },
+      {
+        id: 2,
+        name: "Jordan, 26",
+        photos: ["/api/placeholder/400/600"],
+        bio: "Coffee enthusiast, dog lover, weekend warrior",
+        prompts: [
+          { question: "We should hang out if...", answer: "You love good coffee and outdoor adventures" },
+          { question: "I'm obsessed with...", answer: "Finding the perfect coffee shop" }
+        ]
+      }
+    ]);
+
+    const currentCard = profiles[currentProfile];
+
+    const handleLike = () => {
+      console.log("Liked profile:", currentCard?.name);
+      if (currentProfile < profiles.length - 1) {
+        setCurrentProfile(currentProfile + 1);
+      }
+    };
+
+    const handlePass = () => {
+      console.log("Passed profile:", currentCard?.name);
+      if (currentProfile < profiles.length - 1) {
+        setCurrentProfile(currentProfile + 1);
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-orange-50 to-amber-50 page-transition">
+        {/* Elite Header */}
+        <div className="backdrop-blur-xl bg-white/90 border-b border-white/20 px-6 py-4 sticky top-0 z-10">
+          <div className="max-w-sm mx-auto">
+            <h1 className="text-2xl font-bold text-elite-heading text-center">
+              Discover
+            </h1>
+            <div className="w-16 h-1 bg-gradient-secondary mx-auto mt-2 rounded-full"></div>
+          </div>
+        </div>
+
+        <div className="max-w-sm mx-auto px-4 py-6">
+          {currentCard ? (
+            <div className="card-premium overflow-hidden">
+              {/* Hero Photo with Premium Overlay */}
+              <div className="relative h-[500px] overflow-hidden">
+                <img 
+                  src={currentCard.photos[0]} 
+                  alt={currentCard.name}
+                  className="w-full h-full object-cover scale-105 hover:scale-110 transition-transform duration-700 ease-out"
+                  onError={(e) => {
+                    e.target.src = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjYwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNmOTczMTYiLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNlYTU4MGMiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjYwMCIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCAtYXBwbGUtc3lzdGVtLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkF3ZXNvbWUgUGVyc29uPC90ZXh0Pjwvc3ZnPg==";
+                  }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+                <div className="absolute bottom-6 left-6 right-6">
+                  <h2 className="text-white text-3xl font-bold mb-2 drop-shadow-lg">
+                    {currentCard.name}
+                  </h2>
+                  <div className="w-12 h-1 bg-white/60 rounded-full"></div>
+                </div>
+                
+                {/* Premium Action Buttons - Floating */}
+                <div className="absolute right-4 bottom-4 flex flex-col space-y-3">
+                  <button
+                    onClick={handlePass}
+                    className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center hover:bg-white/30 transition-all duration-300 hover:scale-110 border border-white/30"
+                  >
+                    <X size={20} className="text-white drop-shadow" />
+                  </button>
+                  <button
+                    onClick={handleLike}
+                    className="w-12 h-12 bg-gradient-secondary backdrop-blur-md rounded-full flex items-center justify-center hover:scale-110 transition-all duration-300 shadow-lg border border-white/20"
+                  >
+                    <Check size={20} className="text-white drop-shadow" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Premium Content Cards */}
+              <div className="p-6 space-y-6">
+                {/* Bio Card */}
+                {currentCard.bio && (
+                  <div className="bg-gradient-to-r from-white/60 to-white/40 backdrop-blur-sm rounded-2xl p-5 border border-white/40">
+                    <h3 className="text-premium text-sm font-semibold uppercase tracking-wider mb-3">
+                      About
+                    </h3>
+                    <p className="text-gray-800 leading-relaxed font-medium">
+                      {currentCard.bio}
+                    </p>
+                  </div>
+                )}
+                
+                {/* Premium Prompt Cards */}
+                {currentCard.prompts.map((prompt, index) => (
+                  <div key={index} className="bg-gradient-to-br from-white/70 to-white/50 backdrop-blur-sm rounded-2xl p-5 border border-white/40 hover:shadow-xl hover:scale-[1.02] transition-all duration-300">
+                    <h4 className="text-premium text-sm font-bold uppercase tracking-wider mb-3">
+                      {prompt.question}
+                    </h4>
+                    <p className="text-gray-900 text-lg leading-relaxed font-medium">
+                      {prompt.answer}
+                    </p>
+                  </div>
+                ))}
+
+                {/* Elite Action Bar */}
+                <div className="flex justify-center space-x-4 pt-6">
+                  <button
+                    onClick={handlePass}
+                    className="btn-elite flex-1 max-w-[140px] bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 py-4 rounded-2xl font-bold text-sm uppercase tracking-wide"
+                  >
+                    Pass
+                  </button>
+                  <button
+                    onClick={handleLike}
+                    className="btn-elite flex-1 max-w-[140px] bg-gradient-secondary text-white py-4 rounded-2xl font-bold text-sm uppercase tracking-wide shadow-lg"
+                  >
+                    Like
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-16 card-premium">
+              <div className="loading-elite mx-auto mb-6"></div>
+              <h2 className="text-2xl font-bold text-elite-heading mb-3">
+                Out of profiles!
+              </h2>
+              <p className="text-gray-600 font-medium">
+                Check back soon for more amazing people to discover.
+              </p>
+              <div className="w-24 h-1 bg-gradient-secondary mx-auto mt-6 rounded-full"></div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Tab 2: Groups Screen (Team formation)
+  const GroupsScreen = () => {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-orange-50 to-amber-50 page-transition">
+        {/* Elite Header */}
+        <div className="backdrop-blur-xl bg-white/90 border-b border-white/20 px-6 py-4 sticky top-0 z-10 safe-area-top">
+          <h1 className="text-2xl font-bold text-elite-heading text-center">My Groups</h1>
+        </div>
+
+        <div className="px-6 py-8 max-w-md mx-auto">
+          {/* Premium Empty State */}
+          <div className="text-center py-16 fade-in-up">
+            <div className="relative inline-block mb-8">
+              <div className="absolute inset-0 bg-gradient-secondary rounded-full blur-xl opacity-30 animate-pulse-gentle"></div>
+              <div className="relative w-24 h-24 bg-gradient-secondary rounded-full flex items-center justify-center shadow-lg">
+                <Users size={48} className="text-white" />
+              </div>
+            </div>
+            
+            <h2 className="text-2xl font-bold text-elite-heading mb-3">Create Your First Group</h2>
+            <p className="text-gray-600 mb-8 text-lg leading-relaxed">
+              Form a team with friends to start<br />group activities and adventures
+            </p>
+            
+            {/* Premium CTA Button */}
+            <button className="btn-elite gradient-secondary text-white px-10 py-4 rounded-2xl font-semibold text-lg shadow-lg">
+              Create Group
+            </button>
+          </div>
+
+          {/* Premium Feature Cards */}
+          <div className="space-y-4 mt-12">
+            <div className="card-premium p-6">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-warm rounded-xl flex items-center justify-center">
+                  <UserPlus size={24} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Invite Friends</h3>
+                  <p className="text-sm text-gray-600">Build your perfect squad</p>
+                </div>
+                <ChevronRight size={20} className="text-gray-400" />
+              </div>
+            </div>
+
+            <div className="card-premium p-6">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-cool rounded-xl flex items-center justify-center">
+                  <Search size={24} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Discover Teams</h3>
+                  <p className="text-sm text-gray-600">Find groups that match your vibe</p>
+                </div>
+                <ChevronRight size={20} className="text-gray-400" />
+              </div>
+            </div>
+
+            <div className="card-premium p-6">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-sunset rounded-xl flex items-center justify-center">
+                  <MessageSquare size={24} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Group Chats</h3>
+                  <p className="text-sm text-gray-600">Connect and plan activities</p>
+                </div>
+                <ChevronRight size={20} className="text-gray-400" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Share Invite Modal
+  const ShareInviteModal = () => {
+    const inviteLink = `${window.location.origin}/invite/${user?.uid || 'demo'}`;
+
+    const shareOptions = [
+      { name: 'Text Message', icon: '💬', action: () => {
+        window.open(`sms:?body=${encodeURIComponent(`Join me on TeamUp! ${inviteLink}`)}`);
+      }},
+      { name: 'WhatsApp', icon: '📱', action: () => {
+        window.open(`https://wa.me/?text=${encodeURIComponent(`Join me on TeamUp! ${inviteLink}`)}`);
+      }},
+      { name: 'Copy Link', icon: '📋', action: () => {
+        navigator.clipboard.writeText(inviteLink);
+        alert('Link copied to clipboard!');
+      }},
+      { name: 'Email', icon: '📧', action: () => {
+        window.open(`mailto:?subject=${encodeURIComponent('Join me on TeamUp!')}&body=${encodeURIComponent(`Hey! Join me on TeamUp: ${inviteLink}`)}`);
+      }}
+    ];
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={() => setShowShareModal(false)}>
+        <div className="bg-white w-full rounded-t-3xl p-6 max-w-md mx-auto slide-up" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Share Invite Link</h2>
+            <button onClick={() => setShowShareModal(false)} className="p-2 text-gray-400 hover:text-gray-600">
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-xl mb-6">
+            <p className="text-sm text-gray-600 mb-2">Your invite link:</p>
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={inviteLink}
+                readOnly
+                className="flex-1 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm"
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(inviteLink);
+                  alert('Copied!');
+                }}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold text-sm"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {shareOptions.map((option, index) => (
+              <button
+                key={index}
+                onClick={option.action}
+                className="flex flex-col items-center p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+              >
+                <span className="text-3xl mb-2">{option.icon}</span>
+                <span className="text-sm font-semibold text-gray-700">{option.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Find from Contacts Modal
+  const FindContactsModal = () => {
+    const mockContacts = [
+      { id: 1, name: 'Jessica Wilson', phone: '+1 (555) 123-4567', onTeamUp: true, photo: '/api/placeholder/50/50' },
+      { id: 2, name: 'David Brown', phone: '+1 (555) 234-5678', onTeamUp: false, photo: '/api/placeholder/50/50' },
+      { id: 3, name: 'Ashley Garcia', phone: '+1 (555) 345-6789', onTeamUp: true, photo: '/api/placeholder/50/50' },
+      { id: 4, name: 'Ryan Martinez', phone: '+1 (555) 456-7890', onTeamUp: false, photo: '/api/placeholder/50/50' }
+    ];
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center z-50" onClick={() => setShowContactsModal(false)}>
+        <div className="bg-white w-full max-w-md mx-4 rounded-2xl p-6 max-h-[70vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Find Friends from Contacts</h2>
+            <button onClick={() => setShowContactsModal(false)} className="p-2 text-gray-400 hover:text-gray-600">
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="space-y-3 overflow-y-auto max-h-96">
+            {mockContacts.map((contact) => (
+              <div key={contact.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                <div className="flex items-center space-x-3">
+                  <img src={contact.photo} alt={contact.name} className="w-12 h-12 rounded-full object-cover" />
+                  <div>
+                    <p className="font-semibold text-gray-900">{contact.name}</p>
+                    <p className="text-sm text-gray-600">{contact.phone}</p>
+                  </div>
+                </div>
+                {contact.onTeamUp ? (
+                  <button className="px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold text-sm hover:bg-orange-600">
+                    Add Friend
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => {
+                      window.open(`sms:${contact.phone.replace(/\D/g, '')}?body=${encodeURIComponent('Join me on TeamUp!')}`);
+                    }}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-400"
+                  >
+                    Invite
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Friend Requests Modal
+  const FriendRequestsModal = () => {
+    const handleAcceptRequest = (requestId) => {
+      setFriendRequests(prev => ({
+        ...prev,
+        incoming: prev.incoming.filter(req => req.id !== requestId)
+      }));
+      alert('Friend request accepted!');
+    };
+
+    const handleRejectRequest = (requestId) => {
+      setFriendRequests(prev => ({
+        ...prev,
+        incoming: prev.incoming.filter(req => req.id !== requestId)
+      }));
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center z-50" onClick={() => setShowFriendRequestsModal(false)}>
+        <div className="bg-white w-full max-w-md mx-4 rounded-2xl p-6 max-h-[70vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Friend Requests</h2>
+            <button onClick={() => setShowFriendRequestsModal(false)} className="p-2 text-gray-400 hover:text-gray-600">
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Incoming Requests */}
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">Incoming ({friendRequests.incoming.length})</h3>
+            <div className="space-y-3">
+              {friendRequests.incoming.map((request) => (
+                <div key={request.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                  <div className="flex items-center space-x-3">
+                    <img src={request.photo} alt={request.name} className="w-12 h-12 rounded-full object-cover" />
+                    <div>
+                      <p className="font-semibold text-gray-900">{request.name}</p>
+                      <p className="text-sm text-gray-600">{request.mutual} mutual friends</p>
+                    </div>
+                  </div>
+                  <div className="flex space-x-2">
+                    <button 
+                      onClick={() => handleAcceptRequest(request.id)}
+                      className="px-3 py-1 bg-green-500 text-white rounded-lg font-semibold text-sm hover:bg-green-600"
+                    >
+                      Accept
+                    </button>
+                    <button 
+                      onClick={() => handleRejectRequest(request.id)}
+                      className="px-3 py-1 bg-gray-300 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-400"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Outgoing Requests */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">Sent ({friendRequests.outgoing.length})</h3>
+            <div className="space-y-3">
+              {friendRequests.outgoing.map((request) => (
+                <div key={request.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                  <div className="flex items-center space-x-3">
+                    <img src={request.photo} alt={request.name} className="w-12 h-12 rounded-full object-cover" />
+                    <div>
+                      <p className="font-semibold text-gray-900">{request.name}</p>
+                      <p className="text-sm text-gray-600">{request.mutual} mutual friends</p>
+                    </div>
+                  </div>
+                  <span className="text-sm text-gray-500 bg-gray-200 px-3 py-1 rounded-lg">Pending</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Tab 3: Friends Screen
+  const FriendsScreen = () => {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50 to-pink-50 page-transition">
+        {/* Elite Header */}
+        <div className="backdrop-blur-xl bg-white/90 border-b border-white/20 px-6 py-4 sticky top-0 z-10 safe-area-top">
+          <h1 className="text-2xl font-bold text-elite-heading text-center">Friends</h1>
+        </div>
+
+        <div className="px-6 py-8 max-w-md mx-auto">
+          {/* Premium Empty State */}
+          <div className="text-center py-16 fade-in-up">
+            <div className="relative inline-block mb-8">
+              <div className="absolute inset-0 bg-gradient-sunset rounded-full blur-xl opacity-30 animate-pulse-gentle"></div>
+              <div className="relative w-24 h-24 bg-gradient-sunset rounded-full flex items-center justify-center shadow-lg">
+                <UserPlus size={48} className="text-white" />
+              </div>
+            </div>
+            
+            <h2 className="text-2xl font-bold text-elite-heading mb-3">Invite Your Friends</h2>
+            <p className="text-gray-600 mb-8 text-lg leading-relaxed">
+              Connect with friends to form<br />groups and discover together
+            </p>
+            
+            {/* Premium CTA Button */}
+            <button 
+              onClick={() => setShowShareModal(true)}
+              className="btn-elite gradient-sunset text-white px-10 py-4 rounded-2xl font-semibold text-lg shadow-lg"
+            >
+              Invite Friends
+            </button>
+          </div>
+
+          {/* Premium Contact Methods */}
+          <div className="space-y-4 mt-12">
+            <button 
+              onClick={() => setShowShareModal(true)}
+              className="card-premium p-6 w-full text-left hover:scale-102 transition-transform"
+            >
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-ocean rounded-xl flex items-center justify-center">
+                  <MessageSquare size={24} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Share Invite Link</h3>
+                  <p className="text-sm text-gray-600">Send via text, social media, or email</p>
+                </div>
+                <ChevronRight size={20} className="text-gray-400" />
+              </div>
+            </button>
+
+            <button 
+              onClick={() => setShowContactsModal(true)}
+              className="card-premium p-6 w-full text-left hover:scale-102 transition-transform"
+            >
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-warm rounded-xl flex items-center justify-center">
+                  <User size={24} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Find from Contacts</h3>
+                  <p className="text-sm text-gray-600">Discover friends already on TeamUp</p>
+                </div>
+                <ChevronRight size={20} className="text-gray-400" />
+              </div>
+            </button>
+
+            <button 
+              onClick={() => setShowFriendRequestsModal(true)}
+              className="card-premium p-6 w-full text-left hover:scale-102 transition-transform"
+            >
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-cool rounded-xl flex items-center justify-center">
+                  <Users size={24} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Friend Requests</h3>
+                  <p className="text-sm text-gray-600">Manage incoming and outgoing requests</p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                    <span className="text-xs text-white font-bold">{friendRequests.incoming.length}</span>
+                  </div>
+                  <ChevronRight size={20} className="text-gray-400" />
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Tab 4: Chats Screen
+  const ChatsScreen = () => {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 page-transition">
+        {/* Elite Header */}
+        <div className="backdrop-blur-xl bg-white/90 border-b border-white/20 px-6 py-4 sticky top-0 z-10 safe-area-top">
+          <h1 className="text-2xl font-bold text-elite-heading text-center">Chats</h1>
+        </div>
+
+        <div className="px-6 py-8 max-w-md mx-auto">
+          {/* Premium Empty State */}
+          <div className="text-center py-16 fade-in-up">
+            <div className="relative inline-block mb-8">
+              <div className="absolute inset-0 bg-gradient-ocean rounded-full blur-xl opacity-30 animate-pulse-gentle"></div>
+              <div className="relative w-24 h-24 bg-gradient-ocean rounded-full flex items-center justify-center shadow-lg">
+                <MessageSquare size={48} className="text-white" />
+              </div>
+            </div>
+            
+            <h2 className="text-2xl font-bold text-elite-heading mb-3">No Conversations Yet</h2>
+            <p className="text-gray-600 mb-8 text-lg leading-relaxed">
+              Your chats will appear here once<br />you start connecting with teams
+            </p>
+            
+            {/* Premium CTA Button */}
+            <button 
+              onClick={() => setActiveTab('discover')}
+              className="btn-elite gradient-ocean text-white px-10 py-4 rounded-2xl font-semibold text-lg shadow-lg"
+            >
+              Start Discovering
+            </button>
+          </div>
+
+          {/* Premium Feature Preview */}
+          <div className="space-y-4 mt-12">
+            <div className="card-premium p-6 opacity-60">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-warm rounded-full flex items-center justify-center">
+                  <span className="text-white font-bold text-lg">A</span>
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Adventure Squad</h3>
+                  <p className="text-sm text-gray-500">Hey! Are we still on for this weekend?</p>
+                </div>
+                <div className="text-xs text-gray-400">2:30 PM</div>
+              </div>
+            </div>
+
+            <div className="card-premium p-6 opacity-60">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-sunset rounded-full flex items-center justify-center">
+                  <span className="text-white font-bold text-lg">F</span>
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Foodie Friends</h3>
+                  <p className="text-sm text-gray-500">Found this amazing new restaurant!</p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                    <span className="text-xs text-white font-bold">2</span>
+                  </div>
+                  <div className="text-xs text-gray-400">Yesterday</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="card-premium p-6 opacity-60">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-cool rounded-full flex items-center justify-center">
+                  <span className="text-white font-bold text-lg">S</span>
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900">Study Buddies</h3>
+                  <p className="text-sm text-gray-500">Library session tomorrow at 3?</p>
+                </div>
+                <div className="text-xs text-gray-400">Monday</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Info Text */}
+          <div className="text-center mt-8 opacity-60">
+            <p className="text-sm text-gray-500">
+              Preview: Your group conversations will look like this
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Tab 5: Account Screen (Hinge-style profile)
+  const AccountScreen = () => {
+    // Combine photos and prompts into cards like Hinge
+    const createProfileCards = () => {
+      const cards = [];
+      
+      // First card: Main photo with basic info
+      if (userProfile?.photos?.[0]) {
+        cards.push({
+          type: 'photo',
+          content: userProfile.photos[0],
+          overlay: {
+            name: userProfile?.firstName || 'User',
+            age: userProfile?.age,
+            location: userProfile?.location
+          }
+        });
+      }
+
+      // Add prompt cards and remaining photos in sequence
+      if (userProfile?.prompts && userProfile?.photos) {
+        let photoIndex = 1;
+        userProfile.prompts
+          .filter(prompt => prompt.answer?.trim())
+          .forEach((prompt, index) => {
+            // Add prompt card
+            cards.push({
+              type: 'prompt',
+              content: prompt
+            });
+            
+            // Add photo card if available (after every prompt)
+            if (photoIndex < userProfile.photos.length) {
+              cards.push({
+                type: 'photo',
+                content: userProfile.photos[photoIndex]
+              });
+              photoIndex++;
+            }
+          });
+
+        // Add any remaining photos
+        while (photoIndex < userProfile.photos.length) {
+          cards.push({
+            type: 'photo',
+            content: userProfile.photos[photoIndex]
+          });
+          photoIndex++;
+        }
+      }
+
+      return cards;
+    };
+
+    const profileCards = createProfileCards();
+
+    return (
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-10">
+          <div className="max-w-md mx-auto flex items-center justify-between">
+            <h1 className="text-lg font-semibold text-gray-900">Your Profile</h1>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setCurrentScreen('profile-setup')}
+                className="text-orange-600 hover:text-orange-700 font-medium text-sm"
+              >
+                Edit
+              </button>
+              <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                <Settings size={20} className="text-gray-700" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-w-md mx-auto p-4 space-y-6">
+          {/* Profile incomplete message */}
+          {(!userProfile?.photos || userProfile.photos.length === 0) && (
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-6">
+              <div className="text-center">
+                <User size={48} className="mx-auto text-orange-400 mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Complete your profile</h3>
+                <p className="text-gray-600 text-sm mb-4">Add photos and prompts to show your personality and connect with friend groups</p>
+                <button
+                  onClick={() => setCurrentScreen('profile-setup')}
+                  className="bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
+                >
+                  Complete Profile
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Hinge-style cards */}
+          {profileCards.length > 0 && profileCards.map((card, index) => (
+            <div key={index} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              {card.type === 'photo' ? (
+                <div className="relative aspect-[3/4]">
+                  <img 
+                    src={card.content} 
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                  />
+                  {card.overlay && (
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-6">
+                      <h2 className="text-white text-2xl font-bold mb-1">
+                        {card.overlay.name}{card.overlay.age && `, ${card.overlay.age}`}
+                      </h2>
+                      {card.overlay.location && (
+                        <p className="text-white/90 text-sm flex items-center">
+                          <MapPin size={14} className="mr-1" />
+                          {card.overlay.location}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-6">
+                  <h3 className="text-sm font-semibold text-orange-600 mb-4 uppercase tracking-wide">
+                    {card.content.question}
+                  </h3>
+                  <p className="text-lg text-gray-900 leading-relaxed">
+                    {card.content.answer}
+                  </p>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Bio card if exists */}
+          {userProfile?.bio && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-sm font-semibold text-orange-600 mb-4 uppercase tracking-wide">
+                About Me
+              </h3>
+              <p className="text-lg text-gray-900 leading-relaxed">
+                {userProfile.bio}
+              </p>
+            </div>
+          )}
+
+          {/* Add more content prompt */}
+          {profileCards.length > 0 && (
+            <div className="bg-gray-100 rounded-2xl p-6 text-center">
+              <Plus size={32} className="mx-auto text-gray-400 mb-3" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Want to add more?</h3>
+              <p className="text-gray-600 text-sm mb-4">Add more photos and prompts to show your personality</p>
+              <button
+                onClick={() => setCurrentScreen('profile-setup')}
+                className="bg-orange-600 hover:bg-orange-700 text-white font-semibold py-2 px-6 rounded-xl transition-colors text-sm"
+              >
+                Edit Profile
+              </button>
+            </div>
+          )}
+
+          {/* Bottom spacing for tab navigation */}
+          <div className="h-20"></div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="App">
+      {renderScreen()}
+      
+      {/* Friends Modals */}
+      {showShareModal && <ShareInviteModal />}
+      {showContactsModal && <FindContactsModal />}
+      {showFriendRequestsModal && <FriendRequestsModal />}
+    </div>
+  );
 }
 
 export default App;
